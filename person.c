@@ -90,14 +90,13 @@ int main (int    argc, char **argv)
     }
     attr_name = argv[optind];
 
-    /* not yet implemented */
+    /* ###################################################### */
 
     Person *    p_mmap;
     int         fd;
 
     fd = open_file(file_name);
 
-    // obtain memory map here (after this, we don't use fd)
     p_mmap = (Person *)mmap(
             (void *)0,
             sizeof(Person),
@@ -106,8 +105,36 @@ int main (int    argc, char **argv)
             fd,
             0);
 
-    if(!watch_mode)
+    if(watch_mode)
     {
+        // watch mode 
+        int i = 0;
+
+        printf("waiting...\n");
+        printf("my pid is %x\n", getpid());
+
+        // add self on watchers list
+        for(i = 0; i < NOTIFY_MAX * sizeof(pid_t); i += sizeof(pid_t))
+        {
+            pid_t* p_pid = (pid_t *)((char *)p_mmap + i);
+
+            if( *p_pid == 0 )
+            {
+                *p_pid = getpid();
+                break;
+            }
+        }
+
+        if(i/sizeof(pid_t) == NOTIFY_MAX)
+        {
+            *((pid_t *)p_mmap) = getpid();
+        }
+
+    }
+
+    else // not watch_mode
+    {
+
         int         off;
         char *      data;
 
@@ -116,8 +143,11 @@ int main (int    argc, char **argv)
             fprintf(stderr, "invalid attr name \'%s\'\n", attr_name);
             return -1;
         }
-        else
+
+        if(set_value != NULL)
         {
+            // set mode
+
             printf("attr name is %s(%d)\n", attr_name, off);
 
             if( person_attr_is_integer(attr_name) )
@@ -136,34 +166,26 @@ int main (int    argc, char **argv)
                 msync(p_mmap, sizeof(Person), MS_SYNC);
             }
 
-            print_person(p_mmap);
         }
 
-    }
-    else
-    {
-        int i = 0;
-        printf("waiting...\n");
-        printf("my pid is %x\n", getpid());
-
-        for(i = 0; i < NOTIFY_MAX * sizeof(pid_t); i += sizeof(pid_t))
+        else
         {
-            pid_t* p_pid = (pid_t *)((char *)p_mmap + i);
+            // print mode
 
-            if( *p_pid == 0 )
+            if( person_attr_is_integer(attr_name) )
             {
-                *p_pid = getpid();
-                break;
+                int * addr = (int *)(((char *)p_mmap) + off);
+                printf("%d\n", *addr);
+            }
+            else
+            {
+                char* addr = ((char *)p_mmap) + off;
+                printf("%s\n", addr);
             }
         }
-
-        if(i/sizeof(pid_t) == NOTIFY_MAX)
-        {
-            *((pid_t *)p_mmap) = getpid();
-        }
+        print_person(p_mmap);
     }
 
-    // munmap
     munmap(p_mmap, sizeof(Person));
 
     close(fd);
