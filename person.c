@@ -74,15 +74,36 @@ void sig_handler(int signo, siginfo_t *si)
     switch(signo)
     {
         case SIGUSR1:
-            printf("sig user\n");
-        break;
+            printf("offset received [%d]\n",si->si_value.sival_int);
+            break;
+
         case SIGINT:
         case SIGTERM:
             printf("sig int or term\n");
 
             cleanup();
             exit(0);
-        break;
+            break;
+    }
+}
+
+void send_signal(int offset)
+{
+    int i = 0;
+    union sigval val;
+    val.sival_int = offset;
+
+    for(i = 0; i < NOTIFY_MAX * sizeof(pid_t); i += sizeof(pid_t))
+    {
+        pid_t* p_pid = (pid_t *)((char *)p_mmap + i);
+        if( *p_pid != 0 )
+        {
+            if( sigqueue(*p_pid, SIGUSR1, val) != 0)
+            {
+                // error!
+                *p_pid = 0;
+            }
+        }
     }
 }
 
@@ -92,13 +113,13 @@ int main (int    argc, char **argv)
     const char *set_value;
     const char *attr_name;
     int         watch_mode;
-    
+
     struct sigaction sigact;
 
     sigemptyset(&sigact.sa_mask);
     sigact.sa_flags     = SA_SIGINFO;
-    sigact.sa_restorer  = NULL; 
-    sigact.sa_sigaction = sig_handler; 
+    sigact.sa_restorer  = NULL;
+    sigact.sa_sigaction = sig_handler;
 
     sigaction(SIGUSR1, &sigact, 0);
     sigaction(SIGINT, &sigact, 0);
@@ -203,7 +224,7 @@ int main (int    argc, char **argv)
                 memcpy(addr, set_value, len);
                 msync(p_mmap, sizeof(Person), MS_SYNC);
             }
-
+            send_signal(off);
         }
 
         else // print mode
