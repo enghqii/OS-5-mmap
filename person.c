@@ -39,7 +39,7 @@ int open_file(const char* filename)
     return fd;
 }
 
-void setup(char * file_name)
+void setup(const char * file_name)
 {
     fd = open_file(file_name);
 
@@ -74,16 +74,39 @@ void sig_handler(int signo, siginfo_t *si)
     switch(signo)
     {
         case SIGUSR1:
-            printf("offset received [%d]\n",si->si_value.sival_int);
+        {
+            int offset = si->si_value.sival_int;
+            char* attr = person_lookup_attr_with_offset(offset);
+
+            if( person_attr_is_integer(attr) )
+            {
+                int pid = si->si_pid;
+                int after;
+
+                msync(p_mmap, sizeof(Person), MS_INVALIDATE);
+                after   = *(int *)(((char *)p_mmap)+offset);
+
+                printf("%s : %d from %d\n", attr, after, pid);
+            }
+            else
+            {
+                int pid = si->si_pid;
+                char after[128];
+
+                msync(p_mmap, sizeof(Person), MS_INVALIDATE);
+                strcpy(after, ((char*)p_mmap)+offset);
+
+                printf("%s : %s from %d\n", attr, after, pid);
+            }
+
             break;
+        }
 
         case SIGINT:
         case SIGTERM:
-            printf("sig int or term\n");
 
             cleanup();
             exit(0);
-            break;
     }
 }
 
@@ -96,6 +119,7 @@ void send_signal(int offset)
     for(i = 0; i < NOTIFY_MAX * sizeof(pid_t); i += sizeof(pid_t))
     {
         pid_t* p_pid = (pid_t *)((char *)p_mmap + i);
+
         if( *p_pid != 0 )
         {
             if( sigqueue(*p_pid, SIGUSR1, val) != 0)
@@ -214,7 +238,7 @@ int main (int    argc, char **argv)
                 int * addr = (int *)(((char *)p_mmap) + off);
 
                 *addr = atoi(set_value);
-                msync(p_mmap, sizeof(int), MS_SYNC);
+                msync(addr, sizeof(int), MS_SYNC);
             }
             else
             {
@@ -222,7 +246,7 @@ int main (int    argc, char **argv)
                 int len = strlen(set_value) * sizeof(char) + 1;
 
                 memcpy(addr, set_value, len);
-                msync(p_mmap, sizeof(Person), MS_SYNC);
+                msync(addr, sizeof(Person), MS_SYNC);
             }
             send_signal(off);
         }
