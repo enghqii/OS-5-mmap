@@ -7,7 +7,7 @@
 #include "person.h"
 #include <stdio.h>
 #include <unistd.h>
-#include <fcntl.h> 
+#include <fcntl.h>
 #include <sys/mman.h>
 #include <signal.h>
 
@@ -36,6 +36,17 @@ int open_file(const char* filename)
     return fd;
 }
 
+void print_person(Person* p)
+{
+    printf("name \t%s\n",p->name);
+    printf("age \t%d\n",p->age);
+    printf("gender \t%d\n",p->gender);
+    printf("phone \t%s\n",p->phone);
+    printf("homepage \t%s\n",p->homepage);
+    printf("twitter \t%s\n",p->twitter);
+    printf("facebook \t%s\n",p->facebook);
+}
+
 int main (int    argc, char **argv)
 {
     const char *file_name;
@@ -58,18 +69,18 @@ int main (int    argc, char **argv)
 
         switch (opt)
         {
-        case 'w':
-            watch_mode = 1;
-            break;
-        case 's':
-            set_value = optarg;
-            break;
-        case 'f':
-            file_name = optarg;
-            break;
-        default:
-            print_usage (argv[0]);
-            return -1;
+            case 'w':
+                watch_mode = 1;
+                break;
+            case 's':
+                set_value = optarg;
+                break;
+            case 'f':
+                file_name = optarg;
+                break;
+            default:
+                print_usage (argv[0]);
+                return -1;
         }
     }
     if (!watch_mode && optind >= argc)
@@ -81,64 +92,81 @@ int main (int    argc, char **argv)
 
     /* not yet implemented */
 
-    if(!watch_mode)
-    {
-        Person *    p_mmap;
-        int         fd;
+    Person *    p_mmap;
+    int         fd;
 
-        int         off;
-        char *      data;
+    fd = open_file(file_name);
 
-        fd = open_file(file_name);
-
-        // obtain memory map here (after this, we don't use fd)
-        p_mmap = (Person *)mmap(
-            (void *)0, 
-            sizeof(Person), 
+    // obtain memory map here (after this, we don't use fd)
+    p_mmap = (Person *)mmap(
+            (void *)0,
+            sizeof(Person),
             PROT_READ | PROT_WRITE,
             MAP_SHARED,
             fd,
             0);
 
-        // modify struct's data with mcpy, etc
-        // notify watchers (noted in person.watchers) something changed
-        data = "what";
-        off = person_get_offset_of_attr("name");
-        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+    if(!watch_mode)
+    {
+        int         off;
+        char *      data;
 
-        data = "01012345678";
-        off = person_get_offset_of_attr("phone");
-        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+        if( 0 > (off = person_get_offset_of_attr(attr_name)) )
+        {
+            fprintf(stderr, "invalid attr name \'%s\'\n", attr_name);
+            return -1;
+        }
+        else
+        {
+            printf("attr name is %s(%d)\n", attr_name, off);
 
-        data = "@enghqii";
-        off = person_get_offset_of_attr("twitter");
-        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+            if( person_attr_is_integer(attr_name) )
+            {
+                int * addr = (int *)(((char *)p_mmap) + off);
 
-        data = "enghqii";
-        off = person_get_offset_of_attr("facebook");
-        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+                *addr = atoi(set_value);
+                msync(p_mmap, sizeof(int), MS_SYNC);
+            }
+            else
+            {
+                char* addr = ((char *)p_mmap) + off;
+                int len = strlen(set_value) * sizeof(char) + 1;
 
-        off = person_get_offset_of_attr("age");
-        *(int *)(((char *)p_mmap) + off) = 20;
+                memcpy( addr, set_value, len);
+                msync(p_mmap, sizeof(Person), MS_SYNC);
+            }
 
-        off = person_get_offset_of_attr("gender");
-        *(int *)(((char *)p_mmap) + off) = 1;
+            print_person(p_mmap);
+        }
 
-        printf("offset is %d\n", off);
-        printf("gender : %d\n", p_mmap->gender);
-
-        // msync - do not sync all map. sync partially
-        msync(p_mmap, sizeof(Person), MS_SYNC);
-
-        // munmap
-        munmap(p_mmap, sizeof(Person));
-
-        close(fd);
     }
     else
     {
-        // watch mode
+        int i = 0;
+        printf("waiting...\n");
+        printf("my pid is %x\n", getpid());
+
+        for(i = 0; i < NOTIFY_MAX * sizeof(pid_t); i += sizeof(pid_t))
+        {
+            pid_t* p_pid = (pid_t *)((char *)p_mmap + i);
+
+            if( *p_pid == 0 )
+            {
+                *p_pid = getpid();
+                break;
+            }
+        }
+
+        if(i/sizeof(pid_t) == NOTIFY_MAX)
+        {
+            *((pid_t *)p_mmap) = getpid();
+        }
     }
+
+    // munmap
+    munmap(p_mmap, sizeof(Person));
+
+    close(fd);
 
     // in watching mode, changed property info is given.
 
