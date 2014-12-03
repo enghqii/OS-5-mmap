@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <fcntl.h> 
 #include <sys/mman.h>
+#include <signal.h>
 
 static void print_usage (const char *prog)
 {
@@ -80,12 +81,13 @@ int main (int    argc, char **argv)
 
     /* not yet implemented */
 
+    if(!watch_mode)
     {
-        Person * p_mmap;
-        int fd;
+        Person *    p_mmap;
+        int         fd;
 
-        int off;
-        char * data = "what";
+        int         off;
+        char *      data;
 
         fd = open_file(file_name);
 
@@ -100,16 +102,42 @@ int main (int    argc, char **argv)
 
         // modify struct's data with mcpy, etc
         // notify watchers (noted in person.watchers) something changed
+        data = "what";
         off = person_get_offset_of_attr("name");
-        memcpy( ((char *)p_mmap) + off, data, strlen(data));
+        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
 
-        // msync
+        data = "01012345678";
+        off = person_get_offset_of_attr("phone");
+        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+
+        data = "@enghqii";
+        off = person_get_offset_of_attr("twitter");
+        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+
+        data = "enghqii";
+        off = person_get_offset_of_attr("facebook");
+        memcpy( ((char *)p_mmap) + off, data, strlen(data) * sizeof(char));
+
+        off = person_get_offset_of_attr("age");
+        *(int *)(((char *)p_mmap) + off) = 20;
+
+        off = person_get_offset_of_attr("gender");
+        *(int *)(((char *)p_mmap) + off) = 1;
+
+        printf("offset is %d\n", off);
+        printf("gender : %d\n", p_mmap->gender);
+
+        // msync - do not sync all map. sync partially
         msync(p_mmap, sizeof(Person), MS_SYNC);
 
         // munmap
         munmap(p_mmap, sizeof(Person));
 
         close(fd);
+    }
+    else
+    {
+        // watch mode
     }
 
     // in watching mode, changed property info is given.
