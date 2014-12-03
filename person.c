@@ -11,6 +11,9 @@
 #include <sys/mman.h>
 #include <signal.h>
 
+Person *    p_mmap = 0;
+int         fd = -1;
+
 static void print_usage (const char *prog)
 {
     fprintf (stderr, "usage: %s [-f file] [-w] [-s value] attr_name\n", prog);
@@ -36,6 +39,25 @@ int open_file(const char* filename)
     return fd;
 }
 
+void setup(char * file_name)
+{
+    fd = open_file(file_name);
+
+    p_mmap = (Person *)mmap(
+            (void *)0,
+            sizeof(Person),
+            PROT_READ | PROT_WRITE,
+            MAP_SHARED,
+            fd,
+            0);
+}
+
+void cleanup()
+{
+    munmap(p_mmap, sizeof(Person));
+    close(fd);
+}
+
 void print_person(Person* p)
 {
     printf("name \t%s\n",p->name);
@@ -47,12 +69,40 @@ void print_person(Person* p)
     printf("facebook \t%s\n",p->facebook);
 }
 
+void sig_handler(int signo, siginfo_t *si)
+{
+    switch(signo)
+    {
+        case SIGUSR1:
+            printf("sig user\n");
+        break;
+        case SIGINT:
+        case SIGTERM:
+            printf("sig int or term\n");
+
+            cleanup();
+            exit(0);
+        break;
+    }
+}
+
 int main (int    argc, char **argv)
 {
     const char *file_name;
     const char *set_value;
     const char *attr_name;
     int         watch_mode;
+    
+    struct sigaction sigact;
+
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags     = SA_SIGINFO;
+    sigact.sa_restorer  = NULL; 
+    sigact.sa_sigaction = sig_handler; 
+
+    sigaction(SIGUSR1, &sigact, 0);
+    sigaction(SIGINT, &sigact, 0);
+    sigaction(SIGTERM, &sigact, 0);
 
     /* Parse command line arguments. */
     file_name  = "./person.dat";
@@ -92,22 +142,10 @@ int main (int    argc, char **argv)
 
     /* ###################################################### */
 
-    Person *    p_mmap;
-    int         fd;
+    setup(file_name);
 
-    fd = open_file(file_name);
-
-    p_mmap = (Person *)mmap(
-            (void *)0,
-            sizeof(Person),
-            PROT_READ | PROT_WRITE,
-            MAP_SHARED,
-            fd,
-            0);
-
-    if(watch_mode)
+    if(watch_mode) // watch mode 
     {
-        // watch mode 
         int i = 0;
 
         printf("waiting...\n");
@@ -130,11 +168,13 @@ int main (int    argc, char **argv)
             *((pid_t *)p_mmap) = getpid();
         }
 
+        while(1){
+            sleep(2);
+        }
     }
 
     else // not watch_mode
     {
-
         int         off;
         char *      data;
 
@@ -144,10 +184,8 @@ int main (int    argc, char **argv)
             return -1;
         }
 
-        if(set_value != NULL)
+        if(set_value != NULL) // set mode
         {
-            // set mode
-
             printf("attr name is %s(%d)\n", attr_name, off);
 
             if( person_attr_is_integer(attr_name) )
@@ -162,16 +200,14 @@ int main (int    argc, char **argv)
                 char* addr = ((char *)p_mmap) + off;
                 int len = strlen(set_value) * sizeof(char) + 1;
 
-                memcpy( addr, set_value, len);
+                memcpy(addr, set_value, len);
                 msync(p_mmap, sizeof(Person), MS_SYNC);
             }
 
         }
 
-        else
+        else // print mode
         {
-            // print mode
-
             if( person_attr_is_integer(attr_name) )
             {
                 int * addr = (int *)(((char *)p_mmap) + off);
@@ -186,12 +222,6 @@ int main (int    argc, char **argv)
         print_person(p_mmap);
     }
 
-    munmap(p_mmap, sizeof(Person));
-
-    close(fd);
-
-    // in watching mode, changed property info is given.
-
+    cleanup();
     return 0;
 }
-
